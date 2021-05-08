@@ -307,14 +307,15 @@ def translate_isinstance(builder: IRBuilder, expr: CallExpr, callee: RefExpr) ->
 @specialize_function('builtins.min')
 def faster_min(builder: IRBuilder, expr: CallExpr, callee: RefExpr) -> None:
     if (len(expr.args) > 0
-            and expr.arg_kinds == [ARG_POS, ARG_POS]
-            and callee.fullname == "builtins.min"):
+            and expr.arg_kinds == [ARG_POS, ARG_POS]):
         x, y = builder.accept(expr.args[0]), builder.accept(expr.args[1])
         comparison = builder.binary_op(x, y, '<', expr.line)
         true = BasicBlock()
         false = BasicBlock()
+        new_block = BasicBlock()
         builder.add_bool_branch(comparison, true, false)
         builder.activate_block(true)
         builder.add(Return(x))
         builder.activate_block(false)
         builder.add(Return(y))
+        builder.activate_block(new_block)
