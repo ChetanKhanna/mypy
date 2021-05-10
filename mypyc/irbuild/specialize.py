@@ -18,7 +18,7 @@ from mypy.nodes import CallExpr, RefExpr, MemberExpr, TupleExpr, GeneratorExpr, 
 from mypy.types import AnyType, TypeOfAny
 
 from mypyc.ir.ops import (
-    Value, Register, BasicBlock, Integer, RaiseStandardError, Unreachable, Return
+    Value, Register, BasicBlock, Integer, RaiseStandardError, Unreachable, Assign
 )
 from mypyc.ir.rtypes import (
     RType, RTuple, str_rprimitive, list_rprimitive, dict_rprimitive, set_rprimitive,
@@ -139,6 +139,33 @@ def translate_set_from_generator_call(
             and expr.arg_kinds[0] == ARG_POS
             and isinstance(expr.args[0], GeneratorExpr)):
         return translate_set_comprehension(builder, expr.args[0])
+    return None
+
+
+@specialize_function('builtins.min')
+def faster_min(builder: IRBuilder, expr: CallExpr, callee: RefExpr) -> Optional[Value]:
+    if (len(expr.args) > 0
+            and expr.arg_kinds == [ARG_POS, ARG_POS]):
+        x, y = builder.accept(expr.args[0]), builder.accept(expr.args[1])
+        result = Register(x.type)
+        comparison = builder.binary_op(x, y, '<', expr.line)
+        true = BasicBlock()
+        false = BasicBlock()
+        next_block = BasicBlock()
+
+        builder.add_bool_branch(comparison, true, false)
+
+        builder.activate_block(true)
+        builder.add(Assign(result, x))
+        builder.goto(next_block)
+
+        builder.activate_block(false)
+        builder.add(Assign(result, y))
+        builder.goto(next_block)
+
+        builder.activate_block(next_block)
+
+        return result
     return None
 
 
@@ -302,20 +329,3 @@ def translate_isinstance(builder: IRBuilder, expr: CallExpr, callee: RefExpr) ->
         if irs is not None:
             return builder.builder.isinstance_helper(builder.accept(expr.args[0]), irs, expr.line)
     return None
-
-
-@specialize_function('builtins.min')
-def faster_min(builder: IRBuilder, expr: CallExpr, callee: RefExpr) -> None:
-    if (len(expr.args) > 0
-            and expr.arg_kinds == [ARG_POS, ARG_POS]):
-        x, y = builder.accept(expr.args[0]), builder.accept(expr.args[1])
-        comparison = builder.binary_op(x, y, '<', expr.line)
-        true = BasicBlock()
-        false = BasicBlock()
-        new_block = BasicBlock()
-        builder.add_bool_branch(comparison, true, false)
-        builder.activate_block(true)
-        builder.add(Return(x))
-        builder.activate_block(false)
-        builder.add(Return(y))
-        builder.activate_block(new_block)
